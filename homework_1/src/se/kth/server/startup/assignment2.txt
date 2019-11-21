@@ -1,0 +1,1419 @@
+package se.kth.common;
+
+import java.io.Serializable;
+
+/**
+ *  Is a DTO that has the state of the hang man game.
+ */
+public class GameState implements Serializable {
+    private int score;
+    private int remainingAttempts;
+    private char[] secretWordState;
+    private final String word;
+
+    /**
+     *  Makes an instance of game state.
+     * @param score (Int) - The score for the state
+     * @param remainingAttempts (Int) - The remaining attempts for the state
+     * @param secretWordState (Char[]) - The secret version of the word
+     * @param word (String) - The word
+     */
+    public GameState(int score, int remainingAttempts, char[] secretWordState, String word) {
+        this.score = score;
+        this.remainingAttempts = remainingAttempts;
+        this.secretWordState = secretWordState;
+        this.word = word;
+    }
+
+    /**
+     * @return (INT) returns the number of remaining attempts
+     */
+    public int getRemainingAttempts() {
+        return remainingAttempts;
+    }
+
+    /**
+     * @return  (INT) returns current score.
+     */
+    public int getScore() {
+        return score;
+    }
+
+    /**
+     * @return (CHAR[]) The word but in hidden form.
+     */
+    public char[] getSecretWordState() {
+        return secretWordState;
+    }
+
+    /**
+     * @return (STRING) The word for the game.
+     */
+    public String getWord(){
+        return word;
+    }
+
+    /**
+     *  Will decrement the score by one.
+     */
+    public void decrementScore(){
+        if (score > 0){
+            score--;
+        }
+    }
+
+    /**
+     *  Will decrement the remaining number of attempts by one.
+     */
+    public void decrementRemainingAttempts(){
+        if (remainingAttempts > 0){
+            remainingAttempts--;
+        }
+    }
+
+    /**
+     *  Will set the secret word to the new secret word.
+     * @param secretWordState (Char[]) - the new secret word
+     */
+    public void setSecretWordState(char[] secretWordState) {
+        this.secretWordState = secretWordState;
+    }
+
+    /**
+     *  Formats the game state in to a printable object.
+     * @return (String) - The game state as a formatted string.
+     */
+    @Override
+    public String toString() {
+        StringBuilder stringBuilder = new StringBuilder();
+        if (!word.equals("")){
+            stringBuilder.append("Word: " + new String(secretWordState));
+            stringBuilder.append(" \t Remaining nr attempts: " + remainingAttempts);
+        }else {
+            stringBuilder.append("Start new game to keep playing");
+        }
+        stringBuilder.append("\t Score: " + score + "\n");
+        return stringBuilder.toString();
+    }
+}
+package se.kth.common;
+
+import java.io.Serializable;
+
+/**
+ *  Class for making messages between client and server
+ */
+public class Message implements Serializable {
+    private final MessageType messageType;
+    private final Object body;
+
+    /**
+     *  Creates a message
+     * @param messageType The message type to be made
+     * @param body The message
+     */
+    public Message(MessageType messageType, Object body){
+        this.messageType = messageType;
+        this.body = body;
+    }
+
+    public Object getBody(){
+        return this.body;
+    }
+
+    public MessageType getMessageType(){
+        return this.messageType;
+    }
+
+    @Override
+    public String toString() {
+        return "Message{" + "type=" + messageType + ", body=" + body + '}';
+    }
+
+    /**
+     *  Serializes the message for sending.
+     * @param message (Message) The message to be serialized
+     * @return (String) The serialized message
+     */
+    public static String serialize(Message message) {
+        return message.messageType.toString() + "##" + message.body;
+    }
+
+    /**
+     *  Deserialize a message for receiving.
+     * @param message (String) The serialized message
+     * @return (Message) The deserialized message
+     */
+    public static Message deserialize(String message) {
+        String[] parts = message.split("##");
+        MessageType type = MessageType.valueOf(parts[0].toUpperCase());
+        String body = parts.length > 1 ? parts[1] : "";
+        return new Message(type, body);
+    }
+}
+package se.kth.common;
+
+/**
+ *  The different message types used by the server and client.
+ */
+public enum  MessageType {
+    /**
+     *  Message to start the game, from client to server
+     */
+    START,
+
+    /**
+     *  Message to guess a character or word, from client to server
+     */
+    GUESS,
+
+    /**
+     *  Message to quit, from client to server
+     */
+    QUIT,
+
+    /**
+     *  Response message from server
+     */
+    RESPONSE_START,
+
+    /**
+     *  Response message from server
+     */
+    RESPONSE_GUESS
+
+}
+package se.kth.common;
+
+/**
+ *
+ */
+public class NotValidGuessException extends Exception {
+
+    /**
+     *
+     * @param guess
+     * @param wordLength
+     */
+    public NotValidGuessException(String guess, int wordLength){
+
+    }
+}
+package se.kth.client.controller;
+
+import se.kth.client.net.OutputHandler;
+import se.kth.client.net.ServerConnection;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.concurrent.CompletableFuture;
+
+/**
+ *  This controller connects the view with the controller.
+ *  All the methods are asynchronous. And will print the result through a observer.
+ *  connect(OutputHandler)  -   Connects to the server and register the output handler
+ *  submitGuess(String)     -   Submits the guessed character or word.
+ *  startNewGame()          -   Starts a new instance of the game, score is remained if started before.
+ *  disconnect()            -   Disconnects from the server.
+ */
+public class Controller {
+    private final ServerConnection serverConnection;
+    private boolean connected = false;
+
+    /**
+     *  Creates instance of controller class
+     */
+    public Controller(){
+        serverConnection = new ServerConnection();
+    }
+
+    /**
+     *  Establishes a connection with a server,
+     *  and sets the observer.
+     * @param observer Used for showing incoming messages
+     */
+    public void connect() {
+        CompletableFuture.runAsync(() -> {
+            try {
+                serverConnection.connect();
+            }catch (IOException exception){
+                throw new UncheckedIOException(exception);
+            }
+        }).thenRun(() ->  connected = true);
+    }
+
+    public void setViewObserver(OutputHandler observer){
+        CompletableFuture.runAsync(() -> serverConnection.setViewObserver(observer));
+    }
+
+    /**
+     *  Disconnects from the server.
+     * @throws IOException
+     */
+    public void disconnect() throws IOException{
+        if (connected){
+            serverConnection.disconnect();
+        }
+    }
+
+    /**
+     *  Starts a new hangman game.
+     */
+    public void startNewGame(){
+        if (connected){
+            CompletableFuture.runAsync(() -> serverConnection.startNewGame());
+        }
+    }
+
+    /**
+     *  Submits a game to the running game.
+     * @param guess A character or word.
+     */
+    public void submitGuess(String guess){
+        if (connected) {
+            CompletableFuture.runAsync(() -> serverConnection.submitGuess(guess));
+        }
+    }
+}
+package se.kth.client.net;
+
+/**
+ *  Observer interface.
+ */
+public interface OutputHandler {
+
+    /**
+     *  Prints a message.
+     * @param message (STRING) to print
+     */
+    void print(String message);
+}
+package se.kth.client.net;
+
+import se.kth.common.Message;
+import se.kth.common.MessageType;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.nio.channels.SocketChannel;
+import java.nio.channels.spi.SelectorProvider;
+import java.util.concurrent.LinkedBlockingQueue;
+import static se.kth.common.Message.deserialize;
+import static se.kth.common.Message.serialize;
+
+/**
+ *  Server connection is used for making a connection to a server
+ *  It also takes care of all communication to the server
+ *  connect(OutputHandler)  -   Connects the user to a server, the messages will be shown through handler
+ *  disconnect()            -   Simply disconnects, resets sockets.
+ *  startNewGame()          -   Will tell the server to start a new game of hangman.
+ *  submitGuess(String)     -   Submit guess with a character or a word.
+ */
+public class ServerConnection implements Runnable {
+    private final LinkedBlockingQueue<Message> sendingQueue = new LinkedBlockingQueue<>();
+    private final LinkedBlockingQueue<Message> readingQueue = new LinkedBlockingQueue<>();
+    private final ByteBuffer serverMessage = ByteBuffer.allocateDirect(8192);
+    private InetSocketAddress serverAddress;
+    private SocketChannel socketChannel;
+    private OutputHandler viewObserver;
+    private boolean timeToSend = false;
+    private Selector selector;
+    private boolean connected;
+
+    /**
+     * Makes a connection to the server and sets the view observer.
+     * @throws IOException
+     */
+    public void connect() throws IOException {
+        serverAddress = new InetSocketAddress(InetAddress.getLocalHost(), 4444);
+        new Thread(this).start();
+    }
+
+    public void setViewObserver(OutputHandler viewObserver){
+        this.viewObserver = viewObserver;
+    }
+
+    /**
+     * Will disconnect from the connected server
+     * @throws IOException
+     */
+    public void disconnect() throws IOException{
+        if (connected){
+            queueAndSend(MessageType.QUIT, "");
+            socketChannel.close();
+            socketChannel.keyFor(selector).cancel();
+            socketChannel = null;
+            connected = false;
+        }
+    }
+
+    /**
+     *  Starts a new game.
+     * @throws IOException
+     */
+    public void startNewGame() {
+        if (connected){
+            queueAndSend(MessageType.START, "");
+        } else {
+            viewObserver.print("Not connected to any server...");
+        }
+    }
+
+    /**
+     *  Makes a guess to the started game.
+     * @param guess the guess can be a character or a word in the form of a string
+     * @throws IOException
+     */
+    public void submitGuess(String guess) {
+        if (connected) {
+            queueAndSend(MessageType.GUESS, guess);
+        } else {
+            viewObserver.print("Not connected to any server...");
+        }
+    }
+
+    /**
+     *
+     * @param messageType
+     * @param body
+     */
+    private void queueAndSend(MessageType messageType, String body) {
+        Message message = new Message(messageType, body);
+        synchronized (sendingQueue) {
+            sendingQueue.add(message);
+        }
+        this.timeToSend = true;
+        selector.wakeup();
+    }
+
+    /**
+     *
+     */
+    @Override
+    public void run() {
+        try {
+            initSelector();
+            while (connected) {
+                if (timeToSend) {
+                    socketChannel.keyFor(selector).interestOps(SelectionKey.OP_WRITE);
+                    timeToSend = false;
+                }
+                this.selector.select();
+                for (SelectionKey key : this.selector.selectedKeys()) {
+                    if (!key.isValid()) continue;
+                    checkKey(key);
+                    selector.selectedKeys().remove(key);
+                }
+            }
+        } catch (IOException e) {
+            viewObserver.print(e.getMessage());
+        }
+    }
+
+    /**
+     *
+     * @param key
+     */
+    private void checkKey(SelectionKey key) throws IOException{
+        if (key.isConnectable()) makeConnection(key);
+        else if (key.isReadable()) readFromServer(key);
+        else if (key.isWritable()) sendToServer(key);
+    }
+
+    /**
+     *
+     * @throws IOException
+     */
+    private void initSelector() throws IOException {
+        selector = SelectorProvider.provider().openSelector();
+        socketChannel = SocketChannel.open();
+        socketChannel.configureBlocking(false);
+        socketChannel.connect(serverAddress);
+        socketChannel.register(selector, SelectionKey.OP_CONNECT);
+        connected = true;
+    }
+
+    /**
+     *
+     * @param selectionKey
+     */
+    private void makeConnection(SelectionKey selectionKey) {
+        try{
+            socketChannel.finishConnect();
+            selectionKey.interestOps(SelectionKey.OP_WRITE);
+            viewObserver.print("Connected to server");
+        }catch (IOException exception){
+            viewObserver.print("Couldn't establish connection, try again and check IP and PORT.");
+        }
+    }
+
+    /**
+     *  Will send the a message to the server.
+     *  It makes a message object which consists of a message type and the message to be sent
+     * @param selectionKey
+     * @throws IOException - Is thrown when we can't write to server
+     */
+    private void sendToServer(SelectionKey selectionKey) throws IOException{
+        if (connected) {
+            synchronized (sendingQueue) {
+                while (sendingQueue.size() > 0) {
+                    ByteBuffer message = ByteBuffer.wrap(serialize(sendingQueue.poll()).getBytes());
+                    socketChannel.write(message);
+                    if (message.hasRemaining()) return;
+                }
+            }
+            selectionKey.interestOps(SelectionKey.OP_READ);
+        }
+    }
+
+    /**
+     *
+     * @param selectionKey
+     * @throws IOException
+     */
+    private void readFromServer(SelectionKey selectionKey) throws IOException{
+        serverMessage.clear();
+        int numOfReadBytes = socketChannel.read(serverMessage);
+        if (numOfReadBytes == -1){
+            connected = false;
+            throw new IOException("Server has closed connection!");
+        }
+
+        readingQueue.add(deserialize(getMessageFromBuffer()));
+
+        while (readingQueue.size() > 0) {
+            Message message = readingQueue.poll();
+            viewObserver.print(formatMessage(message));
+        }
+        selectionKey.interestOps(SelectionKey.OP_WRITE);
+    }
+
+    /**
+     *
+     * @return
+     */
+    private String getMessageFromBuffer() {
+        serverMessage.flip();
+        byte[] bytes = new byte[serverMessage.remaining()];
+        serverMessage.get(bytes);
+        return new String(bytes);
+    }
+
+    /**
+     *  Will parse the message and format it for the view.
+     *
+     * @param message The message to be parsed.
+     * @return the message as a string.
+     */
+    private String formatMessage(Message message){
+        String returnMessage = "";
+        switch (message.getMessageType()){
+            case RESPONSE_GUESS:
+            case RESPONSE_START:
+                returnMessage =(String) message.getBody();
+        }
+        return returnMessage;
+    }
+}
+package se.kth.client.startup;
+
+import se.kth.client.view.NonBlockingInterpreter;
+
+/**
+ *  Start-up for client program.
+ */
+class Main {
+
+    /**
+     *  Main function, starts the client program.
+     * @param args Arguments ignored.
+     */
+    public static void main(String[] args) {
+        new NonBlockingInterpreter().start();
+    }
+}
+package se.kth.client.view;
+
+/**
+ *  Defines all commands that can be done by the user interface.
+ */
+public enum Command {
+
+    /**
+     *  Establishes a connection to a server.
+     */
+    CONNECT,
+
+    /**
+     *  Makes guess for the current game, can either be a character or a word.
+     */
+    GUESS,
+
+    /**
+     *  Used when user input doesn't match any of the above.
+     */
+    NO_COMMAND,
+
+    /**
+     *  Disconnects connection from the connected server.
+     */
+    QUIT,
+
+    /**
+     *  Starts a new game of Hangman.
+     */
+    START
+
+}
+package se.kth.client.view;
+
+import java.util.ArrayList;
+import java.util.regex.Pattern;
+
+/**
+ *  Parses user commands,
+ */
+class CommandLine {
+    private static final String PARAM_DELIMITER = " ";
+    private final String IP_REGEX =
+            "(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])";
+    private final String PORT_REGEX =
+            "(6553[0-5]|655[0-2][0-9]\\d|65[0-4](\\d){2}|6[0-4](\\d){3}|[1-5](\\d){4}|[1-9](\\d){0,3})";
+    private final String ALPHANUMERIC_REGEX = "[a-zA-Z0-9.]+";
+    private String[] params;
+    private Command command;
+
+    /**
+     *  Creates instance of a CommandLine object.
+     *  Will parse the entered input.
+     * @param enteredLine (STRING) Input from user.
+     */
+    CommandLine(String enteredLine){
+        determineCommand(enteredLine);
+    }
+
+    Command getCommand(){
+        if (command == null){
+            return null;
+        }
+        return command;
+    }
+
+    /**
+     *  Gets the parameter of given index.
+     * @return returns a parameter or null.
+     */
+    String getParameter(){
+        if (params != null){
+            return params[0];
+        }
+        return null;
+    }
+
+    /**
+     *  Checks if the given string is alphanumeric.
+     * @param line (STRING)
+     * @return (BOOLEAN)
+     */
+    private boolean checkIfAlphanumeric(String line){ return line.matches(ALPHANUMERIC_REGEX); }
+
+    /**
+     *  Parses a list of strings. Removes everything that is not alphanumeric.
+     * @param enteredParams (STRING[]) Parameters from command line.
+     * @return A parsed list of parameters.
+     */
+    private String[] parseParameters(String[] enteredParams){
+        ArrayList<String> parsedParams = new ArrayList<>();
+        for (int i = 1; i < enteredParams.length; i++) {
+            if (checkIfAlphanumeric(enteredParams[i])){
+                parsedParams.add(enteredParams[i]);
+            }
+        }
+        return parsedParams.toArray(new String[0]);
+    }
+
+    /**
+     *  Parses a user input to get the command
+     * @param enteredLine
+     * @return a Command
+     */
+    private Command parseCommand(String enteredLine) {
+        Command command;
+        try {
+            command = Command.valueOf(enteredLine.toUpperCase());
+        } catch (Throwable failedToReadCmd) {
+            command = Command.NO_COMMAND;
+        }
+        return command;
+    }
+
+    /**
+     *  Will determine what kind of command it is and check its parameters.
+     * @param enteredLine The user input
+     */
+    private void determineCommand(String enteredLine){
+        String[] enteredParams = enteredLine.split(PARAM_DELIMITER);
+        if (enteredParams.length == 0){
+            return;
+        }
+        String[] parsedParams = parseParameters(enteredParams);
+        command = parseCommand(enteredParams[0]);
+        switch (command){
+            case GUESS:
+                if (parsedParams.length == 0){
+                    throw new IllegalArgumentException("Missing guessed letter/word");
+                }
+                params = parsedParams;
+                break;
+            case CONNECT:
+                if (parsedParams.length == 0){
+                    params = new String[] {"127.0.0.0", "4444"};
+                    return;
+                } else if (parsedParams.length == 2){
+                    if (!Pattern.matches(IP_REGEX, parsedParams[0])){
+                        throw new IllegalArgumentException("Invalid IP address");
+                    }
+                    if (!Pattern.matches(PORT_REGEX, parsedParams[1])){
+                        throw new IllegalArgumentException("Invalid port");
+                    }
+                    params = new String[] {parsedParams[0], parsedParams[1]};
+                }else{
+                    throw new IllegalArgumentException("There is to many or to few parameters");
+                }
+                break;
+        }
+    }
+}
+package se.kth.client.view;
+
+import se.kth.client.controller.Controller;
+import se.kth.client.net.OutputHandler;
+import java.io.IOException;
+import java.util.Scanner;
+
+/**
+ *  Is a commandline used for parsing and communicating with a server.
+ */
+public class NonBlockingInterpreter implements Runnable {
+    private final InterpreterOutput interpreterOutput = new InterpreterOutput();
+    private final Scanner console = new Scanner(System.in);
+    private final Printer printer = new Printer();
+    private static final String PROMPT = "$ ";
+    private boolean running = false;
+    private Controller controller;
+
+    /**
+     *  Starts the interpreter.
+     */
+    public void start(){
+        if (running) return;
+        running = true;
+        controller = new Controller();
+        controller.setViewObserver(interpreterOutput);
+        new Thread(this).start();
+    }
+
+    /**
+     *  The main function of the program.
+     *  Will check the input if it is a valid command.
+     *  If it is valid it will send that command to the connected server.
+     */
+    @Override
+    public void run() {
+        printer.println(welcomeMessage());
+        while (running){
+            try {
+                CommandLine commandLine = new CommandLine(readNextLine());
+                switch (commandLine.getCommand()){
+                    case START:
+                        controller.startNewGame();
+                        break;
+                    case CONNECT:
+                        controller.connect();
+                        break;
+                    case GUESS:
+                        controller.submitGuess(commandLine.getParameter());
+                        break;
+                    case QUIT:
+                        controller.disconnect();
+                        printer.println("You are now disconnected from the server!\n");
+                        break;
+                }
+            }catch (IllegalArgumentException | IOException exception){
+                printer.println(exception.getMessage() + "\n");
+            }
+        }
+    }
+
+    /**
+     * Helper function for getting the next line from user input.
+     * @return - (String) - The next user input.
+     */
+    private String readNextLine() {
+        printer.print(PROMPT);
+        return console.nextLine();
+    }
+
+    /**
+     *  Creates a welcome message for the user.
+     * @return (String) - A welcome message
+     */
+    private String welcomeMessage(){
+        String border = "----------------";
+        String stars = "******";
+        String titleMessage = border + " WELCOME TO HANGMAN " + border;
+        String infoMessagePartOne = stars + " To connect use: connect, To start game or get new word use: start " + stars;
+        String infoMessagePartTwo = stars + " \tTo guess use: guess [word/letter], and to quit use: quit \t\t " + stars;
+        return "\n" + titleMessage + "\n\n" + infoMessagePartOne + "\n" + infoMessagePartTwo + "\n\n";
+    }
+
+    /**
+     *  Class used for asynchronous messaging from the server.
+     */
+    private class InterpreterOutput implements OutputHandler {
+        @Override
+        public void print(String msg) {
+            printer.println(msg);
+            printer.print(PROMPT);
+        }
+    }
+}
+package se.kth.client.view;
+
+/**
+ *  Does synchronized printing to the user
+ */
+class Printer {
+
+    /**
+     *  Prints to the standard out synchronously
+     * @param output (String) - The string to be printed
+     */
+    synchronized void print(String output){
+        System.out.print(output);
+    }
+
+    /**
+     *  Prints to the standard out synchronously with new line.
+     * @param output (String) - The string to be printed
+     */
+    synchronized void println(String output){
+        System.out.println(output);
+    }
+}
+package se.kth.server.controller;
+
+import se.kth.common.GameState;
+import se.kth.common.NotValidGuessException;
+import se.kth.server.model.GameHandler;
+
+/**
+ *  This controller takes care of the state of the game through the model.
+ *  All the methods are done with the GameHandler class.
+ */
+public class Controller {
+    private final GameHandler gameHandler;
+
+    /**
+     *  Creates an instance of the controller
+     */
+    public Controller(){
+        gameHandler = new GameHandler();
+    }
+
+    /**
+     * Will submit the guess.
+     * @param characters Guessed word or character
+     * @param currentState  The current game state
+     * @return New State
+     */
+    public GameState guess(String characters, GameState currentState){
+        GameState newState;
+        try {
+            newState = gameHandler.guess(characters, currentState);
+        }catch (NotValidGuessException exception){
+            newState = currentState;
+            System.err.println("*** Got a not valid guess ***");
+        }
+        return newState;
+    }
+
+    /**
+     * Starts a new game.
+     * @return Game state
+     */
+    public GameState startGame(){
+        return gameHandler.startGame();
+    }
+
+    /**
+     * Will make a new word and the other stuff needed for a new hangman game.
+     * Score is remained.
+     * @param currentGameState Current game state.
+     * @return New game state.
+     */
+    public GameState newGame(GameState currentGameState){
+        return gameHandler.newGame(currentGameState);
+    }
+}
+package se.kth.server.integration;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.*;
+
+/**
+ *  Takes care of the selection of a word for the game
+ */
+public class Words {
+    private final List<String> WORDS = new ArrayList<>();
+    private final String WORDS_PATH = "/assets/words.txt";
+    private final String PATH = System.getProperty("user.dir") + WORDS_PATH;
+
+    /**
+     *  Creates an instance of the word class and loads the words.
+     */
+    public Words() {
+        loadWords();
+    }
+
+    /**
+     *  Will take a random word from the list of words.
+     * @return  a random word.
+     */
+    public String getRandomWord(){
+        Random random = new Random();
+        return WORDS.get(random.nextInt(WORDS.size())).toLowerCase();
+    }
+
+    /**
+     *  Will load the words from the word file.
+     *  And put all word instances in a list.
+     */
+    private void loadWords(){
+        try {
+            BufferedReader reader = Files.newBufferedReader(Paths.get(PATH));
+            String line = reader.readLine();
+            while (line != null){
+                line = line.replaceAll("\n", "");
+                String[] lineComponents = line.split(" ");
+                Collections.addAll(WORDS, lineComponents);
+                line = reader.readLine();
+            }
+        } catch (IOException e) {
+            System.err.println("Word file not found.");
+        }
+    }
+}
+package se.kth.server.model;
+
+import se.kth.common.GameState;
+import se.kth.common.NotValidGuessException;
+import se.kth.server.integration.Words;
+
+/**
+ *  The class for handling all the game related operations.
+ */
+public class GameHandler {
+    private final Words words;
+
+    /**
+     *  Makes an instance of a game handler.
+     */
+    public GameHandler(){
+        words = new Words();
+    }
+
+    /**
+     *  Helper function for making the "secret word"
+     * @param word A random word.
+     * @return Char array with the same amount of characters as the word but with _ instead.
+     */
+    private char[] makeHiddenWord(String word){
+        char[] hiddenWord = new char[word.length()];
+        for (int i = 0; i < word.length(); i++) {
+            hiddenWord[i] = '_';
+        }
+        return hiddenWord;
+    }
+
+    /**
+     *  Helper function for estimate how many attempts needed for the word.
+     * @param wordLength Length of the word.
+     * @return Number of attempts needed.
+     */
+    private int estimateRemainingAttempts(int wordLength){
+        if (wordLength < 5){
+            return 5;
+        }
+        return wordLength;
+    }
+
+    /**
+     *  Will start a game,
+     *  which makes a game instance with word, secret, score etc.
+     * @return game state.
+     */
+    public GameState startGame(){
+        GameState gameState;
+        String randomWord = "word";
+        char[] hiddenWord = makeHiddenWord(randomWord);
+        int remainingAttempts = estimateRemainingAttempts(randomWord.length());
+        int score = 0;
+        gameState = new GameState(score, remainingAttempts, hiddenWord, randomWord);
+        return gameState;
+    }
+
+    /**
+     *  Will make a new game when an a game state already exists.
+     * @param currentGameState the current game state
+     * @return new game state with the same score as previous state.
+     */
+    public GameState newGame(GameState currentGameState){
+        String randomWord = words.getRandomWord();
+        char[] hiddenWord = makeHiddenWord(randomWord);
+        int remainingAttempts = estimateRemainingAttempts(randomWord.length());
+        return new GameState(currentGameState.getScore(), remainingAttempts, hiddenWord, randomWord);
+    }
+
+    /**
+     *  When the user has no remaining attempts left we will decrement the score.
+     *  Otherwise just return the current game state
+     * @param currentGameState the current game state
+     * @return current game state or game state with a decremented score.
+     */
+    private GameState gameStateWhenLoosing(GameState currentGameState){
+        currentGameState.decrementRemainingAttempts();
+        if (currentGameState.getRemainingAttempts() == 0){
+            currentGameState.decrementScore();
+            currentGameState = newGame(currentGameState);
+        }
+        return currentGameState;
+    }
+
+    /**
+     *  Used for checking the guessed char and updated the game state
+     *  if it was correct or not.
+     * @param guess guessed character from the user.
+     * @param currentGameState current game state.
+     * @return return the new game state. Or just the same if the guess have already been made.
+     */
+    private GameState guessChar(char guess, GameState currentGameState){
+        boolean wrongGuess = true;
+        char[] word = revealWord(currentGameState.getWord());
+        char[] hiddenWord = currentGameState.getSecretWordState();
+        for (int i = 0; i < currentGameState.getWord().length(); i++) {
+            if (guess == word[i]){
+                hiddenWord[i] = guess;
+                wrongGuess = false;
+            }
+        }
+        if (!wrongGuess){
+            currentGameState.setSecretWordState(hiddenWord);
+        } else {
+            currentGameState = gameStateWhenLoosing(currentGameState);
+        }
+        return currentGameState;
+    }
+
+    /**
+     *  Will reveal the hidden word.
+     * @param word the word to be hidden
+     * @return revealed word as char array.
+     */
+    private char[] revealWord(String word){
+        char[] revealedWord = new char[word.length()];
+        for (int i = 0; i < word.length(); i++) {
+            revealedWord[i] = word.charAt(i);
+        }
+        return revealedWord;
+    }
+
+    /**
+     *  Used for checking if the guessed word is correct.
+     *  If it is correct we will remove the word and hidden word and increment the score.
+     * @param guess The guessed word
+     * @param currentGameState the current game state.
+     * @return new game state.
+     */
+    private GameState guessWord(String guess, GameState currentGameState) {
+        if (guess.equals(currentGameState.getWord())){
+            int score = currentGameState.getScore() + 1;
+            char[] empty = {};
+            return new GameState(score, 0, empty, "");
+        } else {
+            currentGameState = gameStateWhenLoosing(currentGameState);
+            return currentGameState;
+        }
+    }
+
+    /**
+     * Will check if the word is valid
+     * @param guess word to be guessed
+     * @param currentGameState current game state
+     * @return returns true if valid, false otherwise
+     */
+    private boolean checkIfValidWord(String guess, GameState currentGameState){
+        return guess.length() > 1 && !(guess.length() > currentGameState.getWord().length());
+    }
+
+    /**
+     * Will check the guess if it is a word or a character and check if it is correct.
+     * @param guess word or character as a string
+     * @param currentGameState the current game state.
+     * @return new game state.
+     * @throws NotValidGuessException if the guess does not have the right amount of characters at the word.
+     */
+    public GameState guess(String guess, GameState currentGameState) throws NotValidGuessException{
+        GameState newGameState;
+        if (guess.length() == 1){
+            char guessedCharacter = guess.charAt(0);
+            newGameState = guessChar(guessedCharacter, currentGameState);
+        } else if(checkIfValidWord(guess, currentGameState)){
+            newGameState = guessWord(guess, currentGameState);
+        } else {
+            throw new NotValidGuessException(guess, currentGameState.getWord().length());
+        }
+        return newGameState;
+    }
+}
+package se.kth.server.net;
+
+import se.kth.common.GameState;
+import se.kth.common.Message;
+import se.kth.common.MessageType;
+import se.kth.server.controller.Controller;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.SocketChannel;
+import java.util.Iterator;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.LinkedBlockingQueue;
+
+import static se.kth.common.Message.deserialize;
+import static se.kth.common.Message.serialize;
+
+/**
+ *  Client handler takes care of all messages to one client.
+ */
+class ClientHandler implements Runnable {
+    private final LinkedBlockingQueue<Message> readingQueue = new LinkedBlockingQueue<>();
+    private final LinkedBlockingQueue<Message> sendingQueue = new LinkedBlockingQueue<>();
+    private final ByteBuffer clientMessage = ByteBuffer.allocateDirect(8192);
+    private final SocketChannel clientSocketChanel;
+    private final HangmanServer hangmanServer;
+    private GameState currentGameState = null;
+    private final Controller controller;
+    private SelectionKey selectionKey;
+    private boolean connected;
+
+    /**
+     *  Makes an instance of a client handler on the client socket.
+     * @param clientSocketChanel Connection to client.
+     * @param hangmanServer The server that has main operations for reading and writing.
+     */
+    ClientHandler(HangmanServer hangmanServer, SocketChannel clientSocketChanel){
+        this.clientSocketChanel = clientSocketChanel;
+        this.hangmanServer = hangmanServer;
+        this.controller = hangmanServer.controller;
+        connected = true;
+    }
+
+    /**
+     *  The main program for the client - server communication.
+     *  Will parse the messages from the client and do the operations it asks for.
+     */
+    @Override
+    public void run() {
+        Iterator<Message> messageIterator = readingQueue.iterator();
+        while (messageIterator.hasNext() && connected) {
+            try {
+                Message receivedMessage = messageIterator.next();
+                switch (receivedMessage.getMessageType()){
+                    case GUESS:
+                        if (currentGameState != null){
+                            currentGameState = controller.guess((String) receivedMessage.getBody(), currentGameState);
+                            sendMessage(MessageType.RESPONSE_GUESS, currentGameState);
+                        } else {
+                            sendMessage(MessageType.RESPONSE_GUESS, "No game started");
+                        }
+                        break;
+                    case START:
+                        if (currentGameState == null){
+                            currentGameState = controller.startGame();
+                        } else {
+                            currentGameState = controller.newGame(currentGameState);
+                        }
+                        sendMessage(MessageType.RESPONSE_START, currentGameState);
+                        break;
+                    case QUIT:
+                        connected = false;
+                        disconnect();
+                        break;
+                }
+            }catch (Throwable err){
+                System.err.println("Something went wrong: " + err.getMessage());
+            }
+            messageIterator.remove();
+        }
+    }
+
+    /**
+     *  Disconnects the client from the server.
+     */
+    void disconnect() {
+        try {
+            if (clientSocketChanel != null){
+                System.out.println("Shutting down connection...");
+                clientSocketChanel.close();
+            }
+        }catch (IOException exception){
+            System.err.println("Unable to disconnect!");
+        }
+    }
+
+    /**
+     *  Reads message from the buffer and adds the message to the reading queue.
+     * @throws IOException Error on client socket channel while reading.
+     */
+    void readMessage() throws IOException{
+        clientMessage.clear();
+        int numOfReadBytes = clientSocketChanel.read(clientMessage);
+        if (numOfReadBytes == -1) throw new IOException("Client has closed connection.");
+        readingQueue.add(deserialize(extractMessageFromBuffer()));
+        ForkJoinPool.commonPool().execute(this);
+    }
+
+    /**
+     * Extract the message from the buffer.
+     * @return (String) message as string
+     */
+    private String extractMessageFromBuffer() {
+        clientMessage.flip();
+        byte[] bytes = new byte[clientMessage.remaining()];
+        clientMessage.get(bytes);
+        System.out.println(new String(bytes));
+        return new String(bytes);
+    }
+
+    /**
+     *  Writes the message to the client.
+     * @throws IOException When something is wrong on the socket chanel while writing
+     */
+    void writeMessage() throws IOException{
+        synchronized (sendingQueue) {
+            while (sendingQueue.size() > 0) {
+                String out = serialize(sendingQueue.poll());
+                System.out.println(out);
+                ByteBuffer message = ByteBuffer.wrap(out.getBytes());
+                clientSocketChanel.write(message);
+            }
+        }
+    }
+
+    void setSelectionKey(SelectionKey selectionKey){
+        this.selectionKey = selectionKey;
+    }
+
+    /**
+     *  A function that will queue up the message that should be sent.
+     * @param messageType What kind of message.
+     * @param body The message body we want to send to the client.
+     */
+    private void sendMessage(MessageType messageType, Object body){
+        Message message = new Message(messageType, body);
+        synchronized (sendingQueue) {
+            sendingQueue.add(message);
+        }
+        hangmanServer.queueMessageForWriting(this.selectionKey);
+        hangmanServer.wakeUpSelector();
+    }
+}
+package se.kth.server.net;
+
+import se.kth.server.controller.Controller;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
+import java.util.Set;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.regex.Pattern;
+
+/**
+ *  Hangman server consists of methods to check validity of a port
+ *  and start a server that accepts connections.
+ */
+public class HangmanServer {
+	private final LinkedBlockingQueue<SelectionKey> sendingQueue = new LinkedBlockingQueue<>();
+	private ServerSocketChannel serverSocketChannel;
+	public final Controller controller;
+	private Selector selector;
+	private boolean running;
+	private int port;
+
+	/**
+	 *  Creates an instance of hangman server with port 4444.
+	 */
+	public HangmanServer(Controller controller){
+		this.port = 4444;
+		this.controller = controller;
+	}
+
+	/**
+	 * Parses a given port. If not valid 4444 will be used.
+	 * @param port The port to be used for the server.
+	 */
+	public void parsePort(String port){
+		final String PORT_REGEX =
+				"(6553[0-5]|655[0-2][0-9]\\d|65[0-4](\\d){2}|6[0-4](\\d){3}|[1-5](\\d){4}|[1-9](\\d){0,3})";
+		if (Pattern.matches(PORT_REGEX, port)){
+			this.port = Integer.valueOf(port);
+		}
+	}
+
+	/**
+	 *  Starts the server.
+	 */
+	public void serve(){
+		try {
+			System.out.println("Starting server...");
+			initSelector();
+			initServerSocketChannel();
+		}catch (IOException exception){
+			System.out.println("\nUnable to start server on given port!");
+			System.exit(1);
+		}
+		running = true;
+		System.out.println("Accepting new connections!");
+		processConnections();
+	}
+
+	/**
+	 *
+	 * @param selectionKey
+	 */
+	public void queueMessageForWriting(SelectionKey selectionKey) {
+		sendingQueue.add(selectionKey);
+	}
+
+	private void initSelector() throws IOException{
+		selector = Selector.open();
+	}
+
+	/**
+	 *
+	 * @throws IOException
+	 */
+	private void initServerSocketChannel() throws IOException{
+		serverSocketChannel = ServerSocketChannel.open();
+		serverSocketChannel.configureBlocking(false);
+		ServerSocket serverSocket = serverSocketChannel.socket();
+		InetSocketAddress inetSocketAddress = new InetSocketAddress(port);
+		serverSocket.bind(inetSocketAddress);
+		System.out.println("Server: " + serverSocket);
+		serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
+	}
+
+	/**
+	 *
+	 */
+	private void processConnections(){
+		while (running){
+			try {
+
+				while (!sendingQueue.isEmpty()) {
+					sendingQueue.poll().interestOps(SelectionKey.OP_WRITE);
+				}
+
+				int numKeys = selector.select();
+				if (numKeys > 0){
+					Set eventKeys = selector.selectedKeys();
+					for (Object eventKey : eventKeys) {
+						SelectionKey key = (SelectionKey) eventKey;
+						if (!key.isValid()) continue;
+						int keyOps = key.readyOps();
+						if ((keyOps & SelectionKey.OP_ACCEPT) == SelectionKey.OP_ACCEPT) acceptClientConnection(key);
+						if ((keyOps & SelectionKey.OP_READ) == SelectionKey.OP_READ) acceptMessageFromConnection(key);
+						if ((keyOps & SelectionKey.OP_WRITE) == SelectionKey.OP_WRITE) writeMessageToConnection(key);
+						selector.selectedKeys().remove(key);
+					}
+				}
+			}catch (IOException exception){
+				System.err.println("Couldn't establish a connection.");
+			}
+		}
+	}
+
+	/**
+	 *
+	 * @param key
+	 * @throws IOException
+	 */
+	private void acceptClientConnection(SelectionKey key) throws IOException {
+		ServerSocketChannel serverSocketChannel = (ServerSocketChannel) key.channel();
+		SocketChannel socketChannel = serverSocketChannel.accept();
+		socketChannel.configureBlocking(false);
+		Socket socket = socketChannel.socket();
+		ClientHandler clientHandler = new ClientHandler(this, socketChannel);
+		System.out.println("Connection on " + socket + ".");
+		SelectionKey selectionKey = socketChannel.register(selector, SelectionKey.OP_READ, clientHandler);
+		clientHandler.setSelectionKey(selectionKey);
+	}
+
+	/**
+	 *
+	 * @param key
+	 */
+	private void acceptMessageFromConnection(SelectionKey key){
+		System.out.println("\nReading message");
+		ClientHandler clientHandler = (ClientHandler) key.attachment();
+		try {
+			clientHandler.readMessage();
+		} catch (IOException exception){
+			removeClient(key);
+		}
+
+	}
+
+	/**
+	 * Removes the disconnects the client from the key and cancels it.
+	 * @param key (SelectionKey) The key the client is attached to.
+	 */
+	private void removeClient(SelectionKey key) {
+		ClientHandler clientHandler = (ClientHandler) key.attachment();
+		clientHandler.disconnect();
+		key.cancel();
+	}
+
+	/**
+	 *	Writes a message to the client attached to the key.
+	 * @param key (SelectionKey) The connection to the client
+	 * @throws IOException If something is wrong when writing
+	 */
+	private void writeMessageToConnection(SelectionKey key) throws IOException {
+		System.out.println("\nWriting message");
+		ClientHandler clientHandler = (ClientHandler) key.attachment();
+		clientHandler.writeMessage();
+		key.interestOps(SelectionKey.OP_READ);
+	}
+
+	/**
+	 *	Wakes up the selector
+	 */
+	public void wakeUpSelector() {
+		selector.wakeup();
+	}
+}
+
